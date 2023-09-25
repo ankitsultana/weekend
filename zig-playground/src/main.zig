@@ -11,6 +11,13 @@ pub fn myFunThatReturnsType() type {
     };
 }
 
+pub fn myDump(data: anytype) void {
+    const T = @TypeOf(data);
+    inline for (@typeInfo(T).Struct.fields) |field| {
+        std.debug.print("{any}\n", .{@field(data, field.name)});
+    }
+}
+
 pub fn main() !void {
     var age: u8 = 8;
     age = 10;
@@ -29,19 +36,19 @@ pub fn main() !void {
     var list = std.ArrayList(i32).init(allocator);
     defer list.deinit();
 
-    try list.append(42);
-    std.debug.print("Hello a list will follow\n", .{});
-    for (list.items) |index, item| {
-        std.debug.print("Index: {d}", .{index});
-        _ = item;
-        // std.debug.print("Value: ", item);
-    }
+    try list.append(3);
+    try list.append(4);
+    try list.append(2);
+    try list.append(3);
+    try list.append(4);
     const myType: type = myFunThatReturnsType();
     _ = myType;
 
-    var rb: ringbuffer.RingBuffer = ringbuffer.RingBuffer{};
-    for (list.items) |index, item| {
-        _ = item;
-        rb.add(index);
+    var rb: *ringbuffer.RingBuffer = try ringbuffer.create(4);
+    for (list.items) |item| {
+        std.debug.print("Item={d}\n", .{item});
+        try rb.add(item);
     }
+    rb.dump();
+    std.debug.print("Last={any}\n", .{rb.idx});
 }

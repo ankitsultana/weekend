@@ -83,3 +83,5 @@ zig-out/
 *.exe
 *.out
 *.app
+
+main
