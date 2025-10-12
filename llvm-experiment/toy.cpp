@@ -1,5 +1,9 @@
 #include <iostream>
+#include <limits>
 #include <map>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
@@ -32,6 +36,40 @@ enum BinaryComparisonOp {
 Value *LogErrorV(const char *Str) {
   cerr << Str << endl;
   return nullptr;
+}
+
+tuple<double, BinaryComparisonOp, double> AwaitComparisonInput() {
+    while (true) {
+        cout << "ready> ";
+        cout.flush();
+
+        double lhs = 0.0;
+        double rhs = 0.0;
+        string opToken;
+
+        if (!(cin >> lhs >> opToken >> rhs)) {
+            throw runtime_error("Failed to read comparison input");
+        }
+
+        BinaryComparisonOp op;
+        if (opToken == ">") {
+            op = BinaryComparisonOp::GT;
+        } else if (opToken == "<") {
+            op = BinaryComparisonOp::LT;
+        } else if (opToken == "==") {
+            op = BinaryComparisonOp::EQ;
+        } else if (opToken == ">=") {
+            op = BinaryComparisonOp::GTE;
+        } else if (opToken == "<=") {
+            op = BinaryComparisonOp::LTE;
+        } else {
+            cerr << "Unknown comparison operator: " << opToken << endl;
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            continue;
+        }
+
+        return make_tuple(lhs, op, rhs);
+    }
 }
 
 namespace JitExpressions {
