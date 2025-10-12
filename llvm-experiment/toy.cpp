@@ -145,6 +145,12 @@ static void InitializeModule() {
 int main() {
     InitializeModule();
     using namespace JitExpressions;
+
+    auto comparisonInput = AwaitComparisonInput();
+    double lhsValue = get<0>(comparisonInput);
+    BinaryComparisonOp op = get<1>(comparisonInput);
+    double rhsValue = get<2>(comparisonInput);
+
     // Create a function to hold IR so Builder has an insertion point
     FunctionType *FT =
         FunctionType::get(Type::getInt1Ty(*TheContext), /*isVarArg=*/false);
@@ -154,9 +160,8 @@ int main() {
     BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", F);
     Builder->SetInsertPoint(BB);
 
-    // 3.0 > 4.0
-    NumberExpr l(3.0), r(4.0);
-    ComparisonExpr expr(BinaryComparisonOp::GT, &l, &r);
+    NumberExpr lhsExpr(lhsValue), rhsExpr(rhsValue);
+    ComparisonExpr expr(op, &lhsExpr, &rhsExpr);
 
     Value *cmp = expr.codegen(); // returns i1
     if (!cmp) {
