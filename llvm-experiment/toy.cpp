@@ -1,9 +1,14 @@
+#include <exception>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
@@ -36,6 +41,23 @@ enum BinaryComparisonOp {
 Value *LogErrorV(const char *Str) {
   cerr << Str << endl;
   return nullptr;
+}
+
+static bool EvaluateComparison(double lhs, double rhs, BinaryComparisonOp op) {
+    switch (op) {
+    case BinaryComparisonOp::GT:
+        return lhs > rhs;
+    case BinaryComparisonOp::LT:
+        return lhs < rhs;
+    case BinaryComparisonOp::EQ:
+        return lhs == rhs;
+    case BinaryComparisonOp::GTE:
+        return lhs >= rhs;
+    case BinaryComparisonOp::LTE:
+        return lhs <= rhs;
+    default:
+        throw invalid_argument("Unsupported binary comparison operator");
+    }
 }
 
 tuple<double, BinaryComparisonOp, double> AwaitComparisonInput() {
@@ -105,8 +127,67 @@ public:
     Value *codegen();
 };
 
+class ArrayComparisonExpr : public Atom {
+public:
+    using Comparator = std::function<bool(int)>;
+
+    ArrayComparisonExpr(const int *values, size_t length, Comparator comparator)
+        : comparator(std::move(comparator)) {
+        if (values != nullptr && length > 0) {
+            data.assign(values, values + length);
+        }
+    }
+
+    virtual ~ArrayComparisonExpr() = default;
+    Value *codegen();
+
+private:
+    std::vector<int> data;
+    Comparator comparator;
+};
+
 Value *NumberExpr::codegen() {
   return ConstantFP::get(*TheContext, APFloat(val));
+}
+
+Value *ArrayComparisonExpr::codegen() {
+    if (!comparator) {
+        return LogErrorV("ArrayComparisonExpr comparator not set");
+    }
+
+    if (!TheModule) {
+        return LogErrorV("Module not initialized");
+    }
+
+    LLVMContext &context = *TheContext;
+    Type *boolTy = Type::getInt1Ty(context);
+
+    if (data.empty()) {
+        return ConstantPointerNull::get(boolTy->getPointerTo());
+    }
+
+    std::vector<Constant *> boolConstants;
+    boolConstants.reserve(data.size());
+    for (int value : data) {
+        bool result = comparator(value);
+        boolConstants.push_back(ConstantInt::get(boolTy, result ? 1 : 0));
+    }
+
+    ArrayType *arrayTy = ArrayType::get(boolTy, boolConstants.size());
+    Constant *constArray = ConstantArray::get(arrayTy, boolConstants);
+
+    static unsigned globalId = 0;
+    string globalName = "array_cmp_results_" + to_string(globalId++);
+
+    GlobalVariable *global = new GlobalVariable(
+        *TheModule, arrayTy, /*isConstant=*/true, GlobalValue::PrivateLinkage, constArray,
+        globalName);
+    global->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+
+    Constant *zero32 = ConstantInt::get(Type::getInt32Ty(context), 0);
+    Constant *indices[] = {zero32, zero32};
+
+    return ConstantExpr::getInBoundsGetElementPtr(arrayTy, global, indices);
 }
 
 Value *ComparisonExpr::codegen() {
@@ -142,7 +223,7 @@ static void InitializeModule() {
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
-int main() {
+static int RunComparisonSession() {
     InitializeModule();
     using namespace JitExpressions;
 
@@ -163,11 +244,32 @@ int main() {
     NumberExpr lhsExpr(lhsValue), rhsExpr(rhsValue);
     ComparisonExpr expr(op, &lhsExpr, &rhsExpr);
 
+    constexpr size_t arrayLength = 5;
+    unique_ptr<int[]> dynamicArray(new int[arrayLength]);
+    for (size_t i = 0; i < arrayLength; ++i) {
+        dynamicArray[i] = static_cast<int>(lhsValue) + static_cast<int>(i);
+    }
+
+    auto comparatorFn = [op, rhsValue](int element) {
+        return EvaluateComparison(static_cast<double>(element), rhsValue, op);
+    };
+
+    ArrayComparisonExpr arrayExpr(dynamicArray.get(), arrayLength, comparatorFn);
+    Value *boolArrayPtr = arrayExpr.codegen();
+    if (!boolArrayPtr) {
+        cerr << "array comparison codegen failed\n";
+        return 1;
+    }
+
     Value *cmp = expr.codegen(); // returns i1
     if (!cmp) {
         cerr << "codegen failed\n";
         return 1;
     }
+
+    Value *arrayPtrSlot =
+        Builder->CreateAlloca(boolArrayPtr->getType(), nullptr, "comparison_results");
+    Builder->CreateStore(boolArrayPtr, arrayPtrSlot);
 
     Builder->CreateRet(cmp);
 
@@ -183,4 +285,13 @@ int main() {
 
     TheModule->print(outs(), nullptr);
     return 0;
+}
+
+int main() {
+    try {
+        return RunComparisonSession();
+    } catch (const std::exception &ex) {
+        cerr << ex.what() << endl;
+        return 1;
+    }
 }
