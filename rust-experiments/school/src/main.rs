@@ -1,5 +1,3 @@
-mod seg_tree;
-
 use crate::seg_tree::SegNode;
 
 fn hello() {
